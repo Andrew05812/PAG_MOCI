@@ -72,7 +72,8 @@ import queue
 from datetime import datetime
 from shared import (
     generate_rsa_keys, rsa_encrypt, rsa_decrypt,
-    LCG, send_msg, MsgReceiver
+    LCG, send_msg, MsgReceiver,
+    bind_entropy_to_widget, get_entropy_count
 )
 
 _server_lcg = LCG()
@@ -104,6 +105,11 @@ class VotingServer:
         self.root.title("Избирком — Центр электронного голосования")
         self.root.geometry("1150x900")
         self.root.minsize(950, 700)
+
+        # Сбор энтропии из случайного физического процесса (движения мыши,
+        # нажатия клавиш пользователя) — интервалы между событиями
+        # непредсказуемы на масштабе наносекунд → источник случайности для ГПСЧ
+        bind_entropy_to_widget(self.root)
 
         # RSA-ключи центра: e (открытый), d (секретный), n (модуль)
         self.center_keys = None

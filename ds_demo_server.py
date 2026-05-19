@@ -21,7 +21,7 @@ from tkinter import ttk
 import socket
 import threading
 import queue
-from shared import generate_rsa_keys, LCG, send_msg, MsgReceiver
+from shared import generate_rsa_keys, LCG, send_msg, MsgReceiver, bind_entropy_to_widget
 
 
 _server_lcg = LCG()
@@ -33,6 +33,9 @@ class DSDemoServer:
         self.root.title("Демонстрация ЭЦП — Сервер")
         self.root.geometry("750x650")
         self.root.configure(bg='#1a1a2e')
+
+        # Сбор энтропии из физического процесса (мышь, клавиатура)
+        bind_entropy_to_widget(self.root)
 
         self.port = port
         self.keys = None

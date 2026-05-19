@@ -37,7 +37,8 @@ import threading
 import queue
 from shared import (
     generate_rsa_keys, rsa_encrypt, rsa_decrypt,
-    generate_random_prime_qi, send_msg, MsgReceiver
+    generate_random_prime_qi, send_msg, MsgReceiver,
+    bind_entropy_to_widget, get_entropy_count
 )
 
 
@@ -66,6 +67,11 @@ class VotingClient:
         self.root.title("Избиратель — Клиент электронного голосования")
         self.root.geometry("1100x880")
         self.root.minsize(900, 700)
+
+        # Сбор энтропии из случайного физического процесса (движения мыши,
+        # нажатия клавиш) — микросекундные интервалы между событиями
+        # непредсказуемы → источник случайности для seed ГПСЧ
+        bind_entropy_to_widget(self.root)
 
         # Сокет и приёмник сообщений
         self.sock = None
