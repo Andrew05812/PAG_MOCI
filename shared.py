@@ -10,7 +10,6 @@ shared.py — Общие криптографические и сетевые у
 """
 
 import random
-import math
 import json
 import socket
 import threading
@@ -33,6 +32,29 @@ import threading
 #   4. Если все k свидетелей не опровергли → вероятно простое
 #   Вероятность ошибки при k=20: менее 4^(-20) ≈ 10^(-12)
 # ==============================================================================
+
+def gcd(a, b):
+    """Вычисление НОД(a,b) алгоритмом Евклида (без библиотек)."""
+    while b:
+        a, b = b, a % b
+    return a
+
+
+def extended_gcd(a, b):
+    """Расширенный алгоритм Евклида: возвращает (g, x, y), где g=НОД(a,b) и a*x+b*y=g."""
+    if a == 0:
+        return b, 0, 1
+    g, x1, y1 = extended_gcd(b % a, a)
+    return g, y1 - (b // a) * x1, x1
+
+
+def mod_inverse(e, phi):
+    """Вычисление обратного по модулю: d ≡ e^(-1) (mod phi) расширенным алгоритмом Евклида."""
+    g, x, _ = extended_gcd(e % phi, phi)
+    if g != 1:
+        raise ValueError(f"Обратного элемента не существует: НОД({e},{phi})={g}")
+    return x % phi
+
 
 def miller_rabin(n, k=20):
     """Тест Миллера-Рабина: возвращает True если n вероятно простое, False если составное."""
@@ -99,13 +121,13 @@ def generate_rsa_keys(bits=256):
 
     # Выбираем открытую экспоненту e, взаимно простую с phi
     e = 65537  # стандартное значение (число Ферма F4)
-    if math.gcd(e, phi) != 1:  # если не взаимно простое — ищем другое
+    if gcd(e, phi) != 1:
         e = 3
-        while math.gcd(e, phi) != 1:
+        while gcd(e, phi) != 1:
             e += 2
 
     # Вычисляем секретную экспоненту d: d ≡ e^(-1) (mod phi)
-    d = pow(e, -1, phi)
+    d = mod_inverse(e, phi)
 
     return {'e': e, 'd': d, 'n': n, 'p': p, 'q': q}
 
