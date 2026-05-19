@@ -2,36 +2,83 @@
 shared.py — Общие криптографические и сетевые утилиты для протокола электронного голосования.
 
 Содержит:
+- Ручной ГПСЧ (LCG — линейный конгруэнтный генератор) — БЕЗ библиотек random/os
 - Тест Миллера-Рабина для проверки простоты чисел
 - Генерацию RSA-ключей (для центра и избирателей)
 - RSA шифрование/расшифрование
 - Генерацию случайного простого qi для затенения бюллетеня
 - Сетевые функции для отправки/приёма JSON-сообщений по TCP
+
+ВСЯ генерация чисел реализована вручную — не используются random, os.urandom
+или любые другие библиотечные ГСЧ.
 """
 
-import random
 import json
 import socket
 import threading
+import time
 
 
 # ==============================================================================
-# Тест Миллера-Рабина — вероятностный тест простоты числа
+# Ручной ГПСЧ — Линейный конгруэнтный генератор (LCG)
 # ==============================================================================
-# Основа: Малая теорема Ферма + свойство квадратных корней из 1 по mod p
-# Алгоритм:
-#   1. Представляем n-1 = 2^r * d (d — нечётное)
-#   2. Выбираем k случайных свидетелей a ∈ [2, n-2]
-#   3. Для каждого свидетеля:
-#      - x = a^d mod n
-#      - Если x==1 или x==n-1 → проходит
-#      - Иначе возводим x в квадрат r-1 раз:
-#        * Если x==n-1 → проходит
-#        * Если x==1 → составное (нетривиальный корень из 1)
-#      - Если ни одна итерация не дала n-1 → составное
-#   4. Если все k свидетелей не опровергли → вероятно простое
-#   Вероятность ошибки при k=20: менее 4^(-20) ≈ 10^(-12)
+# Формула: state = (a * state + c) mod m
+# Параметры из Numerical Recipes (Knuth):
+#   a = 6364136223846793005
+#   c = 1442695040888963407
+#   m = 2^64 (переполнение 64-битного целого)
+# Начальное значение (seed) формируется из системного времени и ID потока
 # ==============================================================================
+
+class LCG:
+    """Линейный конгруэнтный генератор псевдослучайных чисел (ручная реализация)."""
+
+    _A = 6364136223846793005
+    _C = 1442695040888963407
+    _MOD = 1 << 64
+
+    def __init__(self, seed=None):
+        if seed is None:
+            seed = (int(time.perf_counter_ns()) * 1000003
+                    + threading.get_ident() * 1000000007) % self._MOD
+        self._state = seed % self._MOD
+        if self._state == 0:
+            self._state = 1
+
+    def next_int(self):
+        """Следующее псевдослучайное целое (0 .. 2^64-1)."""
+        self._state = (self._A * self._state + self._C) % self._MOD
+        return self._state
+
+    def getrandbits(self, bits):
+        """Генерация псевдослучайного числа заданной битности."""
+        result = 0
+        remaining = bits
+        while remaining > 0:
+            chunk = min(remaining, 64)
+            val = self.next_int()
+            result = (result << chunk) | (val & ((1 << chunk) - 1))
+            remaining -= chunk
+        return result
+
+    def randrange(self, lo, hi):
+        """Псевдослучайное целое в диапазоне [lo, hi)."""
+        if lo >= hi:
+            raise ValueError("lo >= hi")
+        span = hi - lo
+        bit_len = span.bit_length()
+        while True:
+            val = self.getrandbits(bit_len)
+            if val < span:
+                return lo + val
+
+    def randint(self, lo, hi):
+        """Псевдослучайное целое в диапазоне [lo, hi]."""
+        return self.randrange(lo, hi + 1)
+
+
+_lcg = LCG()
+
 
 def gcd(a, b):
     """Вычисление НОД(a,b) алгоритмом Евклида (без библиотек)."""
@@ -65,33 +112,30 @@ def miller_rabin(n, k=20):
     if n % 2 == 0:
         return False
 
-    # Шаг 1: представляем n-1 = 2^r * d, где d — нечётное
     r, d = 0, n - 1
     while d % 2 == 0:
         r += 1
         d //= 2
 
-    # Шаг 2-4: проверяем k случайных свидетелей
     for _ in range(k):
-        a = random.randrange(2, n - 1)  # случайный свидетель
-        x = pow(a, d, n)                # x = a^d mod n
-        if x == 1 or x == n - 1:        # проходит по Малой теореме Ферма
+        a = _lcg.randrange(2, n - 1)
+        x = pow(a, d, n)
+        if x == 1 or x == n - 1:
             continue
-        # Возводим x в квадрат до r-1 раз, ищем нетривиальный корень из 1
         for _ in range(r - 1):
-            x = pow(x, 2, n)            # x = x^2 mod n
-            if x == n - 1:              # проходит — корень -1
+            x = pow(x, 2, n)
+            if x == n - 1:
                 break
         else:
-            return False  # составное — ни одна итерация не дала n-1
-    return True  # вероятно простое
+            return False
+    return True
 
 
 def generate_prime(bits):
-    """Генерация случайного простого числа заданной битности."""
+    """Генерация случайного простого числа заданной битности (ручной ГПСЧ)."""
     while True:
-        n = random.getrandbits(bits)
-        n |= (1 << (bits - 1)) | 1  # гарантируем старший бит=1 и нечётность
+        n = _lcg.getrandbits(bits)
+        n |= (1 << (bits - 1)) | 1
         if miller_rabin(n):
             return n
 
@@ -110,23 +154,20 @@ def generate_rsa_keys(bits=256):
     Генерация пары RSA-ключей.
     Возвращает словарь: e (открытая экспонента), d (секретная), n (модуль), p, q.
     """
-    # Генерируем два различных простых числа
     p = generate_prime(bits // 2)
     q = generate_prime(bits // 2)
-    while p == q:  # p и q должны быть различны
+    while p == q:
         q = generate_prime(bits // 2)
 
-    n = p * q              # модуль RSA
-    phi = (p - 1) * (q - 1)  # функция Эйлера
+    n = p * q
+    phi = (p - 1) * (q - 1)
 
-    # Выбираем открытую экспоненту e, взаимно простую с phi
-    e = 65537  # стандартное значение (число Ферма F4)
+    e = 65537
     if gcd(e, phi) != 1:
         e = 3
         while gcd(e, phi) != 1:
             e += 2
 
-    # Вычисляем секретную экспоненту d: d ≡ e^(-1) (mod phi)
     d = mod_inverse(e, phi)
 
     return {'e': e, 'd': d, 'n': n, 'p': p, 'q': q}
@@ -160,10 +201,10 @@ def rsa_decrypt(ciphertext, d, n):
 # ==============================================================================
 
 def generate_random_prime_qi():
-    """Генерация случайного простого числа qi из диапазона [5, 10000]."""
+    """Генерация случайного простого числа qi из диапазона [5, 10000] (ручной ГПСЧ)."""
     while True:
-        q = random.randint(5, 10000)
-        if miller_rabin(q, 10):  # проверяем простоту (10 раундов — достаточно для малых чисел)
+        q = _lcg.randint(5, 10000)
+        if miller_rabin(q, 10):
             return q
 
 
@@ -185,17 +226,17 @@ class MsgReceiver:
 
     def __init__(self, sock):
         self.sock = sock
-        self.buf = b''  # буфер для накопления данных
+        self.buf = b''
 
     def recv(self):
         """Блокирующий приём одного JSON-сообщения. Возвращает dict или None при разрыве."""
-        while b'\n' not in self.buf:  # ждём完整ную строку
+        while b'\n' not in self.buf:
             try:
                 chunk = self.sock.recv(8192)
             except (ConnectionError, OSError):
                 return None
-            if not chunk:  # соединение закрыто
+            if not chunk:
                 return None
             self.buf += chunk
-        line, self.buf = self.buf.split(b'\n', 1)  # отделяем одну строку
-        return json.loads(line.decode('utf-8'))      # парсим JSON
+        line, self.buf = self.buf.split(b'\n', 1)
+        return json.loads(line.decode('utf-8'))

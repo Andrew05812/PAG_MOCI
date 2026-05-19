@@ -69,12 +69,13 @@ from tkinter import ttk
 import socket
 import threading
 import queue
-import random
 from datetime import datetime
 from shared import (
     generate_rsa_keys, rsa_encrypt, rsa_decrypt,
-    send_msg, MsgReceiver
+    LCG, send_msg, MsgReceiver
 )
+
+_server_lcg = LCG()
 
 
 class VotingServer:
@@ -466,7 +467,7 @@ class VotingServer:
 
         # Генерация случайного challenge (128 бит) для аутентификации
         # Избиратель должен будет подписать его своим секретным ключом d_voter
-        challenge = random.getrandbits(128)
+        challenge = _server_lcg.getrandbits(128)
         self.registered_voters[vid] = {
             'pub_e': pub_e, 'pub_n': pub_n,
             'challenge': challenge, 'authenticated': False
@@ -699,7 +700,7 @@ class VotingServer:
 
         # Генерация vote_challenge для повторной аутентификации
         # при отправке бюллетеня (схема «Вызов-Ответ»)
-        challenge = random.getrandbits(128)
+        challenge = _server_lcg.getrandbits(128)
         self.registered_voters[vid]['vote_challenge'] = challenge
 
         self._log(self.vote_log, f"  Аутентификация: отправлен вызов {challenge}")
