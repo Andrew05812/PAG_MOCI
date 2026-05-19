@@ -35,6 +35,8 @@ class VotingClient:
         self.pending_action = None
         self.attacker_keys = None
         self.stored_results = None
+        self.voting_active = False
+        self.ballots_received = False
 
         self._build_gui()
         self._poll()
@@ -106,6 +108,7 @@ class VotingClient:
         rr = ttk.Frame(rf)
         rr.pack(fill=tk.X, padx=5, pady=3)
         ttk.Button(rr, text="Зарегистрироваться", command=self._register).pack(side=tk.LEFT, padx=5)
+        ttk.Button(rr, text="Получить список избирателей", command=self._get_voter_list).pack(side=tk.LEFT, padx=5)
         self.reg_status = ttk.Label(rr, text="Не зарегистрирован", foreground="red")
         self.reg_status.pack(side=tk.LEFT, padx=10)
         self.reg_log = self._txt(rf, height=8)
@@ -130,9 +133,11 @@ class VotingClient:
         ttk.Button(br, text="Отправить голос", command=self._send_vote).pack(side=tk.LEFT, padx=5)
         self.vote_btn_status = ttk.Label(br, text="Голос не отправлен", foreground="red")
         self.vote_btn_status.pack(side=tk.LEFT, padx=10)
+        self.vote_phase_label = ttk.Label(br, text="Ожидание начала голосования", foreground="red")
+        self.vote_phase_label.pack(side=tk.LEFT, padx=10)
         self.vote_log = self._txt(bf, height=10)
 
-        tf = ttk.LabelFrame(t2, text="Таблица бюллетеней (с сервера)")
+        tf = ttk.LabelFrame(t2, text="Таблица бюллетеней (публикуется после завершения голосования)")
         tf.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
         tr = ttk.Frame(tf)
         tr.pack(fill=tk.X, padx=5, pady=3)
@@ -238,6 +243,12 @@ class VotingClient:
             self._on_vote_challenge(msg)
         elif t == "vote_result":
             self._on_vote_result(msg)
+        elif t == "voting_started":
+            self._on_voting_started(msg)
+        elif t == "ballots_published":
+            self._on_ballots_published(msg)
+        elif t == "voter_list":
+            self._on_voter_list(msg)
         elif t == "table":
             self._on_table(msg)
         elif t == "results":
@@ -365,6 +376,41 @@ class VotingClient:
     def _on_vote_challenge(self, msg):
         self._on_challenge(msg)
 
+    def _on_voting_started(self, msg):
+        self.voting_active = True
+        voters = msg.get("voters", [])
+        self._log(self.vote_log, f"ГОЛОСОВАНИЕ НАЧАЛОСЬ! Список избирателей: {voters}")
+        self._schedule(lambda: self.vote_phase_label.configure(text="Голосование АКТИВНО", foreground="green"))
+
+    def _on_ballots_published(self, msg):
+        self.ballots_received = True
+        self.voting_active = False
+        ballots = msg.get("ballots", [])
+        if "center_e" in msg:
+            self.center_pub_e = msg["center_e"]
+        if "center_n" in msg:
+            self.center_pub_n = msg["center_n"]
+        self._log(self.vote_log, f"Голосование завершено. Опубликовано бюллетеней: {len(ballots)}")
+        self._schedule(lambda: self.vote_phase_label.configure(text="Голосование завершено, бюллетени опубликованы", foreground="blue"))
+        self._on_table(msg)
+
+    def _on_voter_list(self, msg):
+        voters = msg.get("voters", [])
+        w = self.reg_log
+        self._log(w, "--- Список зарегистрированных избирателей ---")
+        for v in voters:
+            self._log(w, f"  ID={v['id']}  pub_e={v['pub_e']}  pub_n={v['pub_n']}")
+        self._log(w, f"Всего: {len(voters)}")
+
+    def _get_voter_list(self):
+        if not self.connected:
+            self._log(self.reg_log, "ОШИБКА: Нет подключения!")
+            return
+        try:
+            send_msg(self.sock, {"type": "get_voter_list"})
+        except (ConnectionError, OSError):
+            pass
+
     def _on_auth_result(self, msg):
         success = msg["success"]
         message = msg["message"]
@@ -463,11 +509,14 @@ class VotingClient:
             pass
 
     def _on_table(self, msg):
-        ballots = msg["ballots"]
+        ballots = msg.get("ballots", [])
+        msg_text = msg.get("message", "")
         if "center_e" in msg:
             self.center_pub_e = msg["center_e"]
         if "center_n" in msg:
             self.center_pub_n = msg["center_n"]
+        if msg_text and not ballots:
+            self._log(self.vote_log, msg_text)
         def _do():
             for item in self.table_tree.get_children():
                 self.table_tree.delete(item)
